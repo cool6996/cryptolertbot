@@ -77,7 +77,6 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Price: <b>${price_usd:,.2f}</b> {arrow} ({delta_txt} 24h)\n"
             f"• Market Cap: ${_abbr(cap)}\n"
             f"• 24h Volume: ${_abbr(vol_24h)}\n"
-            f"\nTip: Try /price ETH or /price SOL"
         )
 
         await update.message.reply_text(msg, parse_mode="HTML")
