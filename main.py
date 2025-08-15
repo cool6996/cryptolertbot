@@ -1,69 +1,69 @@
 import os
+import logging
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Load tokens from environment variables
+# Enable logging (helps us debug Railway crashes)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# Get tokens from environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_KEY = os.getenv("API_KEY")
+LIVECOINWATCH_API_KEY = os.getenv("LIVECOINWATCH_API_KEY")
 
 BASE_URL = "https://api.livecoinwatch.com/coins/single"
 
-# Command: /start
+# Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_message = (
-        "🚀 Welcome to Crypto Alerts Bot!\n\n"
-        "Use /price <symbol> to get the latest price.\n"
-        "Example: /price BTC\n\n"
-        "You can also check:\n"
-        "• BTC\n"
-        "• ETH\n"
-        "• SOL\n\n"
-        "💡 Tip: Use only well-known coin tickers for best results."
-    )
-    await update.message.reply_text(welcome_message)
+    await update.message.reply_text("👋 Hey! Send /price BTC to get Bitcoin price.")
 
-# Command: /price
+# Price command
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❌ Please provide a coin symbol. Example: /price BTC")
+        await update.message.reply_text("❌ Please provide a symbol, e.g., /price BTC")
         return
 
-    coin_symbol = context.args[0].upper()
-
-    headers = {
-        "content-type": "application/json",
-        "x-api-key": API_KEY
-    }
-    data = {
-        "currency": "USD",
-        "code": coin_symbol,
-        "meta": False
-    }
+    symbol = context.args[0].upper()
 
     try:
-        response = requests.post(BASE_URL, headers=headers, json=data)
-        if response.status_code == 200:
-            result = response.json()
-            price_usd = result.get("rate")
-            if price_usd:
-                await update.message.reply_text(f"💰 {coin_symbol} Price: ${price_usd:,.2f}")
-            else:
-                await update.message.reply_text("⚠ Could not find that coin. Try another symbol.")
+        headers = {
+            "content-type": "application/json",
+            "x-api-key": LIVECOINWATCH_API_KEY
+        }
+        payload = {
+            "currency": "USD",
+            "code": symbol,
+            "meta": False
+        }
+        response = requests.post(BASE_URL, json=payload, headers=headers)
+        data = response.json()
+
+        if "rate" in data:
+            price_usd = round(data["rate"], 2)
+            await update.message.reply_text(f"💰 {symbol} price: ${price_usd}")
         else:
-            await update.message.reply_text("⚠ Error fetching data. Please try again later.")
+            await update.message.reply_text("❌ Could not fetch price. Check symbol or API key.")
+
     except Exception as e:
-        await update.message.reply_text(f"⚠ An error occurred: {str(e)}")
+        logger.error(f"Error fetching price: {e}")
+        await update.message.reply_text("⚠️ An error occurred.")
 
 def main():
+    if not BOT_TOKEN or not LIVECOINWATCH_API_KEY:
+        logger.error("Missing BOT_TOKEN or LIVECOINWATCH_API_KEY environment variable")
+        return
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("price", price))
 
-    print("✅ Bot is running...")
+    logger.info("Bot started...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-  
