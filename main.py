@@ -2,10 +2,12 @@ import math
 import os
 import requests
 from telegram import Update
-from telegram.ext import ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # Read API key (support both names, use whichever you set on Railway)
 LIVECOINWATCH_API_KEY = os.getenv("LIVECOINWATCH_API_KEY") or os.getenv("API_KEY")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 BASE_URL = "https://api.livecoinwatch.com/coins/single"
 
 def _abbr(n: float) -> str:
@@ -19,8 +21,8 @@ def _abbr(n: float) -> str:
     units = ["", "K", "M", "B", "T", "Q"]
     k = 1000.0
     i = int(math.floor(math.log(abs(n), k)))
-    i = max(0, min(i, len(units)-1))
-    val = n / (k**i)
+    i = max(0, min(i, len(units) - 1))
+    val = n / (k ** i)
     return f"{val:.2f}{units[i]}"
 
 def _delta_emoji(pct: float) -> str:
@@ -46,7 +48,7 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payload = {
         "currency": "USD",
         "code": symbol,
-        "meta": True  # include market cap, volume, deltas, etc.
+        "meta": True
     }
 
     try:
@@ -82,6 +84,18 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except requests.Timeout:
         await update.message.reply_text("⏳ API timed out. Please try again.")
-    except Exception as e:
-        # Keep bot alive, just show friendly error
+    except Exception:
         await update.message.reply_text("⚠️ Unexpected error. Try again in a moment.")
+
+# --- Main app ---
+if __name__ == "__main__":
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN not set on server.")
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Register the /price handler
+    app.add_handler(CommandHandler("price", price))
+
+    print("✅ Bot is running...")
+    app.run_polling()
