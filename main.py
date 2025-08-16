@@ -9,31 +9,25 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, ContextTypes
 )
 
-# ==========================
-# Logging
-# ==========================
+# ───────── Logging ─────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 )
 log = logging.getLogger("cryptolertbot")
 
-# ==========================
-# Env
-# ==========================
+# ───────── Env ─────────
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-LIVECOINWATCH_API_KEY = os.getenv("LIVECOINWATCH_API_KEY") or os.getenv("API_KEY")  # supports both names
-DATABASE_URL = os.getenv("DATABASE_URL")  # Railway Postgres URL (we'll set this after code deploy)
+LIVECOINWATCH_API_KEY = os.getenv("LIVECOINWATCH_API_KEY") or os.getenv("API_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. postgresql://B:C@A:E/D
 
 LCW_SINGLE = "https://api.livecoinwatch.com/coins/single"
 LCW_LIST = "https://api.livecoinwatch.com/coins/list"
 FEAR_GREED_URL = "https://api.alternative.me/fng/?limit=2&format=json"
 
-USE_DB = bool(DATABASE_URL)  # enable /alert only when DB URL exists
+USE_DB = bool(DATABASE_URL)
 
-# ==========================
-# DB (lazy init)
-# ==========================
+# ───────── DB (psycopg2, lazy init) ─────────
 conn = None  # psycopg2 connection
 
 def db_connect():
@@ -99,9 +93,7 @@ def db_delete_by_id(alert_id: int):
         cur.execute("DELETE FROM alerts WHERE id = %s", (alert_id,))
         conn.commit()
 
-# ==========================
-# Helpers
-# ==========================
+# ───────── Helpers ─────────
 def _abbr(n: Optional[float]) -> str:
     try:
         n = float(n)
@@ -167,9 +159,7 @@ def lcw_list(limit: int = 200) -> List[Dict]:
         log.error(f"LCW list error: {e}")
         return []
 
-# ==========================
-# Commands
-# ==========================
+# ───────── Commands ─────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "👋 <b>Welcome to Crypto Alerts (@cryptolertbot)</b>\n"
@@ -180,7 +170,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /trending – hot coins by 24h volume\n"
         "• /convert <amt> <from> <to> – convert coins or to USD\n"
         "• /feargreed – market sentiment (Fear & Greed)\n"
-        "• /alert <symbol> <price> – set a price alert (auto-deletes when hit)\n"
+        "• /alert <symbol> <price> – set a price alert (auto-deletes)\n"
         "• /myalerts – list your alerts\n"
         "• /delalert <id> – delete an alert by id\n"
         f"\nAlerts: {'✅ enabled' if USE_DB else '❌ disabled (owner must add DATABASE_URL)'}"
@@ -192,7 +182,7 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /price <symbol>\nExample: /price BTC")
         return
     if not LIVECOINWATCH_API_KEY:
-        await update.message.reply_text("API key missing on server. (Owner: set LIVECOINWATCH_API_KEY)")
+        await update.message.reply_text("API key missing on server.")
         return
 
     sym = context.args[0].upper()
@@ -245,7 +235,7 @@ async def losers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     coins = lcw_list(200)
     coins = [c for c in coins if isinstance(c.get("delta"), dict) and c["delta"].get("day") is not None]
-    coins.sort(key=lambda c: c["delta"]["day"])  # ascending = biggest drop first
+    coins.sort(key=lambda c: c["delta"]["day"])  # biggest drop first
     top = coins[:10]
     if not top:
         await update.message.reply_text("No data right now. Try later.")
@@ -345,12 +335,10 @@ async def feargreed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_text("Error fetching sentiment.")
 
-# ==========================
-# Alerts (DB-backed)
-# ==========================
+# ───────── Alerts (DB-backed) ─────────
 async def alert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not USE_DB:
-        await update.message.reply_text("Alerts are disabled (owner must add a free Postgres on Railway).")
+        await update.message.reply_text("Alerts are disabled (owner must add a free Postgres + DATABASE_URL).")
         return
     if len(context.args) < 2:
         await update.message.reply_text("Usage: /alert <symbol> <price>\nEx: /alert btc 125000")
@@ -418,7 +406,7 @@ async def alert_check_job(context: ContextTypes.DEFAULT_TYPE):
         if not rows:
             return
 
-        # Collect unique symbols to minimize API calls
+        # unique symbols -> fewer API calls
         symbols: Set[str] = set(r[3].upper() for r in rows)
         prices: Dict[str, Optional[float]] = {}
 
@@ -426,7 +414,7 @@ async def alert_check_job(context: ContextTypes.DEFAULT_TYPE):
             data = lcw_single(sym)
             prices[sym] = float(data["rate"]) if data and data.get("rate") is not None else None
 
-        # Evaluate
+        # evaluate
         for (aid, user_id, chat_id, sym, target, direction) in rows:
             sym = sym.upper()
             price_now = prices.get(sym)
@@ -434,7 +422,6 @@ async def alert_check_job(context: ContextTypes.DEFAULT_TYPE):
                 continue
             hit = (direction == "above" and price_now >= float(target)) or (direction == "below" and price_now <= float(target))
             if hit:
-                # notify and delete
                 try:
                     await context.bot.send_message(
                         chat_id=chat_id,
@@ -451,16 +438,13 @@ async def alert_check_job(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         log.error(f"alert_check_job error: {e}")
 
-# ==========================
-# Main
-# ==========================
+# ───────── Main ─────────
 def main():
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN not set")
     if not LIVECOINWATCH_API_KEY:
         log.warning("LIVECOINWATCH_API_KEY not set — price/gainers/losers/trending/convert will fail.")
 
-    # Initialize DB lazily (only if configured)
     if USE_DB:
         try:
             db_connect()
@@ -483,7 +467,6 @@ def main():
     app.add_handler(CommandHandler("delalert", delalert))
 
     # Jobs
-    # Check alerts every 120s (2 minutes), first run after 15s
     app.job_queue.run_repeating(alert_check_job, interval=120, first=15)
 
     log.info("✅ Bot is running...")
